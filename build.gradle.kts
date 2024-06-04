@@ -20,8 +20,6 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("org.mindrot:jbcrypt:0.4")
     implementation("com.github.sealedtx:java-youtube-downloader:3.2.3")
-    implementation("org.mp4parser:isoparser:1.9.56")
-    implementation("org.mp4parser:muxer:1.9.56")
     implementation("org.slf4j:slf4j-api:2.1.0-alpha1")
     runtimeOnly("org.slf4j:slf4j-simple:2.1.0-alpha1")
 }

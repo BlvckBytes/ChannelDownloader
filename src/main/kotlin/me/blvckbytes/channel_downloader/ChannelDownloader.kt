@@ -18,11 +18,6 @@ import me.blvckbytes.springhttptesting.HttpMethod
 import me.blvckbytes.springhttptesting.HttpResponse
 import me.blvckbytes.springhttptesting.MultiValueStringMapBuilder
 import me.blvckbytes.springhttptesting.validation.JsonObjectExtractor
-import org.mp4parser.muxer.FileRandomAccessSourceImpl
-import org.mp4parser.muxer.Movie
-import org.mp4parser.muxer.Track
-import org.mp4parser.muxer.builder.FragmentedMp4Builder
-import org.mp4parser.muxer.container.mp4.MovieCreator
 import java.io.*
 import java.net.URL
 import java.time.format.DateTimeFormatter
@@ -31,6 +26,7 @@ import java.util.*
 
 class ChannelDownloader(
   private val apiKey: String,
+  ffmpegPath: String,
   private val channelHandle: String,
   rootDirectory: File,
 ) {
@@ -47,10 +43,14 @@ class ChannelDownloader(
 
   private val videoOutputDir = File(rootDirectory, VIDEOS_FOLDER_NAME)
   private val videosFile = File(rootDirectory, VIDEOS_FILE_NAME)
+  private val ffmpegExecutable = File(ffmpegPath)
 
   init {
     makeDirs(rootDirectory)
     makeDirs(videoOutputDir)
+
+    if (!(ffmpegExecutable.isFile && ffmpegExecutable.canExecute()))
+      throw IllegalStateException("Expected the ffmpeg executable to be an executable file: $ffmpegExecutable")
   }
 
   /*
@@ -144,89 +144,49 @@ class ChannelDownloader(
     return updatedVideos
   }
 
-  private fun movieFromFile(file: File): Movie {
-    return FileInputStream(file).use {
-      MovieCreator.build(it.channel, FileRandomAccessSourceImpl(RandomAccessFile(file, "r")), file.name)
-    }
-  }
-
-  private fun combineVideoFiles(
-    videoId: String, videoFile: File, audioFile: File,
-    videoNumber: Int, videoCount: Int,
-    descendingAudioFormats: List<AudioFormat>,
-    currentAudioFormatsIndex: Int,
-  ): String? {
+  private fun combineVideoFiles(videoId: String, videoFile: File, audioFile: File): String? {
     println("Combining separated audio/video files ${videoFile.name} and ${audioFile.name}")
-
-    val videoTracks: List<Track>
-    val audioTracks: List<Track>
-
-    try {
-      videoTracks = movieFromFile(videoFile).tracks.filter { it.handler == "vide" }
-      audioTracks = movieFromFile(audioFile).tracks.filter { it.handler == "soun" }
-    } catch (exception: Exception) {
-      return exception.stackTraceToString()
-    }
-
-    if (videoTracks.size != 1 || audioTracks.size != 1)
-      return "Expected exactly one video- and audio-track, but found ${videoTracks.size}, ${audioTracks.size}"
 
     val outputFile = File(videoFile.parentFile, "$videoId.$VIDEO_FORMAT")
 
-    try {
-      val movie = Movie()
+    val process = ProcessBuilder(
+      ffmpegExecutable.absolutePath,
+      "-i", videoFile.absolutePath,
+      "-i", audioFile.absolutePath,
+      "-acodec", "copy",
+      "-vcodec", "copy",
+      "-y", // Overwrite if exists
+      outputFile.absolutePath
+    )
+      .redirectErrorStream(true)
+      .start()
 
-      movie.addTrack(videoTracks.first())
-      movie.addTrack(audioTracks.first())
+    val logBuilder = StringBuilder()
 
-      FileOutputStream(outputFile).use {
-        FragmentedMp4Builder()
-          .build(movie)
-          .writeContainer(it.channel)
+    BufferedReader(InputStreamReader(process.inputStream)).use {
+      while (true) {
+        val line = it.readLine() ?: break
+        logBuilder.append(line)
+        println(line)
       }
-    } catch (exception: Exception) {
-      // In all cases, delete the corrupted output file
-      outputFile.delete()
-
-      // This exception occurs only for a hand-full of videos; the solution seems to be
-      // to choose the next-worse audio format. Maybe this is a bug in the downloader, or
-      // the mp4-builder, or just plainly a corrupted file served by YouTube...
-      if (exception is ArrayIndexOutOfBoundsException) {
-        println("An error occurred while trying to combine audio/video files, deleting result")
-
-        // No more audio formats to choose from
-        if (currentAudioFormatsIndex + 1 >= descendingAudioFormats.size)
-          return "Exhausted audio formats list, could not make any combination work.\n${exception.stackTraceToString()}"
-
-        val nextWorseAudioFormat = descendingAudioFormats[currentAudioFormatsIndex + 1]
-
-        println("Trying with next worse audio format: ${nextWorseAudioFormat.audioQuality().name}")
-
-        // Override existing audio file
-        val audioError = downloadFormat(audioFile, nextWorseAudioFormat, videoNumber, videoCount, true)
-
-        if (audioError != null)
-          return audioError.stackTraceToString()
-
-        return combineVideoFiles(
-          videoId, videoFile, audioFile, videoNumber, videoCount,
-          descendingAudioFormats, currentAudioFormatsIndex + 1
-        )
-      }
-
-      return exception.stackTraceToString()
     }
 
-    println("Deleting separated files ${videoFile.name} and ${audioFile.name}")
+    if (process.waitFor() == 0) {
+      println("Deleting separated files ${videoFile.name} and ${audioFile.name}")
 
-    if (!videoFile.delete())
-      return "Could not delete downloaded video file"
+      if (!videoFile.delete())
+        return "Could not delete downloaded video file"
 
-    if (!audioFile.delete())
-      return "Could not delete downloaded audio file"
+      if (!audioFile.delete())
+        return "Could not delete downloaded audio file"
 
-    println("Finished combining into ${outputFile.name}")
-    return null
+      println("Finished combining into ${outputFile.name}")
+      return null
+    }
+
+    println("An error occurred while trying to combine audio/video files, deleting result")
+    outputFile.delete()
+    return logBuilder.toString()
   }
 
   private fun downloadVideo(videoId: String, videoNumber: Int, videoCount: Int): String? {
@@ -256,11 +216,9 @@ class ChannelDownloader(
     if (videoError != null)
       return videoError.stackTraceToString()
 
-    val descendingAudioFormats = video.audioFormats()
+    val bestAudioFormat = video.audioFormats()
       .filter { it.extension().value() == AUDIO_FORMAT }
-      .sortedByDescending { it.audioQuality().ordinal }
-
-    val bestAudioFormat = descendingAudioFormats.first()
+      .maxByOrNull { it.audioQuality().ordinal }
       ?: return "ERROR: Could not locate a $AUDIO_FORMAT-format for video $videoId ($videoNumber/$videoCount)"
 
     val audioError = downloadFormat(audioFile, bestAudioFormat, videoNumber, videoCount)
@@ -268,7 +226,7 @@ class ChannelDownloader(
     if (audioError != null)
       return audioError.stackTraceToString()
 
-    return combineVideoFiles(videoId, videoFile, audioFile, videoNumber, videoCount, descendingAudioFormats, 0)
+    return combineVideoFiles(videoId, videoFile, audioFile)
   }
 
   private fun downloadFormat(
