@@ -19,6 +19,7 @@ import me.blvckbytes.springhttptesting.HttpResponse
 import me.blvckbytes.springhttptesting.MultiValueStringMapBuilder
 import me.blvckbytes.springhttptesting.validation.JsonObjectExtractor
 import java.io.*
+import java.net.HttpURLConnection
 import java.net.URL
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoField
@@ -104,15 +105,24 @@ class ChannelDownloader(
     println("Downloading videos")
 
     val errorVideoIds = mutableMapOf<String, String>()
+    val numberOfVideos = videos.size
 
     for ((videoIndex, video) in videos.withIndex()) {
-      val error = downloadVideo(video.videoId, videoIndex + 1, videos.size)
+      val videoNumber = videoIndex + 1
+      var error = downloadVideo(video.videoId, videoNumber, numberOfVideos)
+
+      if (error != null) {
+        errorVideoIds[video.videoId] = error
+        continue
+      }
+
+      error = downloadThumbnail(video, videoNumber, numberOfVideos)
 
       if (error != null)
         errorVideoIds[video.videoId] = error
     }
 
-    println("The following video downloads resulted in an error:")
+    println("The following downloads resulted in an error:")
 
     errorVideoIds.forEach {
       println("- ${it.key}:")
@@ -186,6 +196,39 @@ class ChannelDownloader(
     println("An error occurred while trying to combine audio/video files, deleting result")
     outputFile.delete()
     return logBuilder.toString()
+  }
+
+  private fun downloadThumbnail(video: YouTubeVideo, videoNumber: Int, videoCount: Int): String? {
+    val fileExtension = video.thumbnailUrl.substring(video.thumbnailUrl.lastIndexOf('.'))
+    val thumbnailFile = File(videoOutputDir, "${video.videoId}$fileExtension")
+
+    if (thumbnailFile.exists()) {
+      println("Found existing thumbnail file for video ${video.videoId} ($videoNumber/$videoCount)")
+      return null
+    }
+
+    try {
+      println("Downloading thumbnail file for video ${video.videoId}")
+
+      val connection = URL(video.thumbnailUrl).openConnection() as HttpURLConnection
+
+      if (connection.responseCode == 200) {
+        thumbnailFile.writeBytes(connection.inputStream.readAllBytes())
+        return null
+      }
+
+      val errorResponse = connection.errorStream.readAllBytes()
+
+      if (connection.responseCode == 404 && connection.contentType.startsWith("image")) {
+        println("Thumbnail seems to be gone, downloading the provided placeholder")
+        thumbnailFile.writeBytes(errorResponse)
+        return null
+      }
+
+      return "URL ${video.thumbnailUrl} responded ${connection.responseCode}\n${errorResponse.decodeToString()}"
+    } catch (exception: Exception) {
+      return exception.stackTraceToString()
+    }
   }
 
   private fun downloadVideo(videoId: String, videoNumber: Int, videoCount: Int): String? {
