@@ -33,7 +33,6 @@ class ChannelDownloader(
 
   companion object {
     private const val BASE_URL = "https://www.googleapis.com/youtube/v3"
-    private const val PAGE_SIZE = 50
     private const val VIDEOS_FILE_NAME = "videos.json"
     private const val VIDEOS_FOLDER_NAME = "videos"
     private const val DOWNLOAD_FILES_PREFIX = "download_"
@@ -355,6 +354,7 @@ class ChannelDownloader(
           .add("videoId", video.videoId)
           .add("textFormat", "plainText")
           .add("part", "id,replies,snippet")
+          .add("maxResults", 100)
       ) },
       { extractor ->
         var commentThread = YouTubeCommentThread.extractCommentThread(extractor)
@@ -376,6 +376,7 @@ class ChannelDownloader(
                   .add("parentId", commentThread.id)
                   .add("textFormat", "plainText")
                   .add("part", "id,snippet")
+                  .add("maxResults", 100)
               ) },
               { YouTubeCommentReply.extractComment(it, video.videoId) },
               { null },
@@ -412,6 +413,7 @@ class ChannelDownloader(
         requestParams = baseParams
           .add("part", "snippet,contentDetails")
           .add("playlistId", playlistId)
+          .add("maxResults", 50)
       ) },
       YouTubeVideo.Companion::extract,
       { null },
@@ -460,7 +462,6 @@ class ChannelDownloader(
   private fun makeBaseParams(apiKey: String, pageToken: String? = null): MultiValueStringMapBuilder {
     val result = MultiValueStringMapBuilder()
       .add("key", apiKey)
-      .add("maxResults", PAGE_SIZE)
 
     if (pageToken != null)
       result.add("pageToken", pageToken)
