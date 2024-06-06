@@ -31,3 +31,21 @@ tasks.test {
 tasks.withType<KotlinCompile> {
     kotlinOptions.jvmTarget = "1.8"
 }
+
+tasks.withType<Jar> {
+    manifest {
+        attributes["Main-Class"] = "me.blvckbytes.channel_downloader.Main"
+    }
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    // Include the kotlin runtime into the JAR
+
+    from(sourceSets.main.get().output)
+
+    dependsOn(configurations.runtimeClasspath)
+
+    from({
+        configurations.runtimeClasspath.get().filter { it.name.endsWith("jar") }.map { zipTree(it) }
+    })
+}
