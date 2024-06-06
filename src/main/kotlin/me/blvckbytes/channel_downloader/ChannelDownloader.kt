@@ -39,6 +39,15 @@ class ChannelDownloader(
     private const val DOWNLOAD_FILES_PREFIX = "download_"
     private const val AUDIO_FORMAT = "m4a"
     private const val VIDEO_FORMAT = "mp4"
+
+    fun makeDirs(directory: File) {
+      if (!directory.exists()) {
+        if (!directory.mkdirs())
+          throw IllegalStateException("Could not create directory $directory")
+      }
+      else if (!directory.isDirectory)
+        throw IllegalStateException("Expected $directory to be a directory")
+    }
   }
 
   private val videoOutputDir = File(rootDirectory, VIDEOS_FOLDER_NAME)
@@ -88,45 +97,47 @@ class ChannelDownloader(
     }
   }
 
-  /**
-   * @param update Whether to update local video and comment data using the YouTube API
-   */
-  fun download(update: Boolean) {
+  fun download(
+    updateJson: Boolean,
+    downloadVideos: Boolean,
+  ) {
     var videos = loadLocalVideos()
 
     println("Loaded ${videos.size} local videos")
 
-    if (update) {
+    if (updateJson) {
       println("Updating local information")
       videos = pullUpdate(videos, channelHandle, apiKey)
       videosFile.writeText(gson.toJson(videos), Charsets.UTF_8)
     }
 
-    println("Downloading videos")
+    if (downloadVideos) {
+      println("Downloading videos")
 
-    val errorVideoIds = mutableMapOf<String, String>()
-    val numberOfVideos = videos.size
+      val errorVideoIds = mutableMapOf<String, String>()
+      val numberOfVideos = videos.size
 
-    for ((videoIndex, video) in videos.withIndex()) {
-      val videoNumber = videoIndex + 1
-      var error = downloadVideo(video.videoId, videoNumber, numberOfVideos)
+      for ((videoIndex, video) in videos.withIndex()) {
+        val videoNumber = videoIndex + 1
+        var error = downloadVideo(video.videoId, videoNumber, numberOfVideos)
 
-      if (error != null) {
-        errorVideoIds[video.videoId] = error
-        continue
+        if (error != null) {
+          errorVideoIds[video.videoId] = error
+          continue
+        }
+
+        error = downloadThumbnail(video, videoNumber, numberOfVideos)
+
+        if (error != null)
+          errorVideoIds[video.videoId] = error
       }
 
-      error = downloadThumbnail(video, videoNumber, numberOfVideos)
+      println("The following downloads resulted in an error:")
 
-      if (error != null)
-        errorVideoIds[video.videoId] = error
-    }
-
-    println("The following downloads resulted in an error:")
-
-    errorVideoIds.forEach {
-      println("- ${it.key}:")
-      println(it.value)
+      errorVideoIds.forEach {
+        println("- ${it.key}:")
+        println(it.value)
+      }
     }
   }
 
@@ -540,15 +551,5 @@ class ChannelDownloader(
     }
 
     return result.toString()
-  }
-
-  private fun makeDirs(directory: File) {
-    if (!directory.exists()) {
-      if (!directory.mkdirs())
-        throw IllegalStateException("Could not create directory $directory")
-    }
-    else if (!directory.isDirectory)
-      throw IllegalStateException("Expected $directory to be a directory")
-
   }
 }

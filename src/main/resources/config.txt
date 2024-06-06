@@ -1,0 +1,5 @@
+apiKey=<your-api-key>
+ffmpegPath=/opt/homebrew/bin/ffmpeg
+channelHandle=YourTargetChannelHere
+updateJson=true
+downloadVideos=true
