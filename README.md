@@ -1,0 +1,5 @@
+# ChannelDownloader
+
+Created to download entire channels, including thumbnails, videos, comments and their replies. Can also be quickly modified to download playlists by ID. Builds up a local additive JSON-file database, so that remotely deleted content still persists. Circumvents login-guards for age-restricted content successfully, at least at the time of writing this. Offers a simple yet effective configuration-file for seamless multi-channel support. Always chooses the highest quality audio- and video formats available; uses the ffmpeg-binary to mux these separate tracks into a final mp4-file.
+
+The YouTube-API does **not** support video download; they prohibit it, as by the [Terms of Service](https://developers.google.com/youtube/terms/api-services-terms-of-service). Downloading foreign videos may also result in a violation of copyright laws. **This project is only meant for educational purposes and has to be executed at one's own risk.**
