@@ -1,4 +1,6 @@
-package me.blvckbytes.channel_downloader.model
+package me.blvckbytes.channel_downloader
+
+import me.blvckbytes.channel_downloader.model.Identifiable
 
 object ExtensionUtil {
   class ExtensionResult(

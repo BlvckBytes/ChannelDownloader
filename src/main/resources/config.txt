@@ -1,5 +1,15 @@
+# Appended to every request to YouTube's Data-API
+# See https://developers.google.com/youtube/v3/docs
 apiKey=<your-api-key>
+
+# Path to the ffmpeg executable; used to combine separately downloaded video and audio
 ffmpegPath=/opt/homebrew/bin/ffmpeg
+
+# The part between > and < in https://youtube.com/@>Handle<
 channelHandle=YourTargetChannelHere
+
+# Whether to fetch video- and comment-data from the API
 updateJson=true
+
+# Whether to download missing videos and thumbnails
 downloadVideos=true

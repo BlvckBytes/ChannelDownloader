@@ -1,15 +1,5 @@
 package me.blvckbytes.channel_downloader
 
-import com.github.kiulian.downloader.YoutubeDownloader
-import com.github.kiulian.downloader.downloader.YoutubeProgressCallback
-import com.github.kiulian.downloader.downloader.request.RequestVideoFileDownload
-import com.github.kiulian.downloader.downloader.request.RequestVideoInfo
-import com.github.kiulian.downloader.downloader.response.Response
-import com.github.kiulian.downloader.downloader.response.ResponseStatus
-import com.github.kiulian.downloader.model.videos.VideoInfo
-import com.github.kiulian.downloader.model.videos.formats.AudioFormat
-import com.github.kiulian.downloader.model.videos.formats.Format
-import com.github.kiulian.downloader.model.videos.formats.VideoFormat
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonSyntaxException
 import me.blvckbytes.channel_downloader.model.*
@@ -25,6 +15,24 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoField
 import java.util.*
 
+// TODO: Timestamps should really be objects, not plain strings...
+// TODO: Video-id ignore list in config
+
+/**
+  Requests are made as follows:
+
+  Find "uploads" playlist using /channels (1 quota unit)
+  Page through videos using /playlistItems (1 quota unit)
+  For each video, fetch top-level comments using /commentThreads (1 quota unit)
+  For each top-level comment, fetch replies using /comments (1 quota unit)
+    NOTE: For few replies (<=5, I believe), replies inlined into the response of
+    /commentThreads suffice, thus unnecessary additional requests are not issued
+
+  At the time of writing this, there are ~940 videos with ~2500 top-level comments
+  and ~4500 replies in total. One execution consumes ~300 quota units; with 10k units
+  per day, one could pull updates around 30 times a day. Realistically, 1-5 times a
+  day will suffice to capture all channel activity.
+ */
 class ChannelDownloader(
   private val apiKey: String,
   ffmpegPath: String,
@@ -54,6 +62,13 @@ class ChannelDownloader(
   private val videosFile = File(rootDirectory, VIDEOS_FILE_NAME)
   private val ffmpegExecutable = File(ffmpegPath)
 
+  private val gson = GsonBuilder()
+    .setPrettyPrinting()
+    .serializeNulls()
+    .create()
+
+  private var currentOutputFile: File? = null
+
   init {
     makeDirs(rootDirectory)
     makeDirs(videoOutputDir)
@@ -61,33 +76,6 @@ class ChannelDownloader(
     if (!(ffmpegExecutable.isFile && ffmpegExecutable.canExecute()))
       throw IllegalStateException("Expected the ffmpeg executable to be an executable file: $ffmpegExecutable")
   }
-
-  /*
-    TODO: XR1BF50_qbU is age-restricted; download manually!
-    TODO: Timestamps should really be objects, not plain strings...
-
-    Requests are made as follows:
-
-    Find "uploads" playlist using /channels (1 quota unit)
-    Page through videos using /playlistItems (1 quota unit)
-    For each video, fetch top-level comments using /commentThreads (1 quota unit)
-    For each top-level comment, fetch replies using /comments (1 quota unit)
-      NOTE: For few replies (<=5, I believe), replies inlined into the response of
-      /commentThreads suffice, thus unnecessary additional requests are not issued
-
-    At the time of writing this, there are ~940 videos with ~2500 top-level comments
-    and ~4500 replies in total. One execution consumes ~300 quota units; with 10k units
-    per day, one could pull updates around 30 times a day. Realistically, 1-5 times a
-    day will suffice to capture all channel activity.
-   */
-
-  private val gson = GsonBuilder()
-    .setPrettyPrinting()
-    .serializeNulls()
-    .create()
-
-  private val youtubeDownloader = YoutubeDownloader()
-  private var currentOutputFile: File? = null
 
   fun onShutdown() {
     // Delete (partially) corrupted file, which hasn't been fully completed
@@ -119,18 +107,18 @@ class ChannelDownloader(
 
       for ((videoIndex, video) in videos.withIndex()) {
         val videoNumber = videoIndex + 1
-        var error = downloadVideo(video.videoId, videoNumber, numberOfVideos)
 
-        if (error != null) {
-          errorVideoIds[video.videoId] = error
+        try {
+          downloadVideo(video.videoId, videoNumber, numberOfVideos)
+          downloadThumbnail(video, videoNumber, numberOfVideos)
+        } catch (exception: Exception) {
+          errorVideoIds[video.videoId] = exception.stackTraceToString()
           continue
         }
-
-        error = downloadThumbnail(video, videoNumber, numberOfVideos)
-
-        if (error != null)
-          errorVideoIds[video.videoId] = error
       }
+
+      if (errorVideoIds.isEmpty())
+        return
 
       println("The following downloads resulted in an error:")
 
@@ -164,7 +152,7 @@ class ChannelDownloader(
     return updatedVideos
   }
 
-  private fun combineVideoFiles(videoId: String, videoFile: File, audioFile: File): String? {
+  private fun combineVideoFiles(videoId: String, videoFile: File, audioFile: File) {
     println("Combining separated audio/video files ${videoFile.name} and ${audioFile.name}")
 
     val outputFile = File(videoFile.parentFile, "$videoId.$VIDEO_FORMAT")
@@ -195,141 +183,74 @@ class ChannelDownloader(
       println("Deleting separated files ${videoFile.name} and ${audioFile.name}")
 
       if (!videoFile.delete())
-        return "Could not delete downloaded video file"
+        throw IllegalStateException("Could not delete downloaded video file")
 
       if (!audioFile.delete())
-        return "Could not delete downloaded audio file"
+        throw IllegalStateException("Could not delete downloaded audio file")
 
       println("Finished combining into ${outputFile.name}")
-      return null
+      return
     }
 
     println("An error occurred while trying to combine audio/video files, deleting result")
     outputFile.delete()
-    return logBuilder.toString()
+    throw IllegalStateException(logBuilder.toString())
   }
 
-  private fun downloadThumbnail(video: YouTubeVideo, videoNumber: Int, videoCount: Int): String? {
+  private fun downloadThumbnail(video: YouTubeVideo, videoNumber: Int, videoCount: Int) {
     val fileExtension = video.thumbnailUrl.substring(video.thumbnailUrl.lastIndexOf('.'))
     val thumbnailFile = File(videoOutputDir, "${video.videoId}$fileExtension")
 
     if (thumbnailFile.exists()) {
       println("Found existing thumbnail file for video ${video.videoId} ($videoNumber/$videoCount)")
-      return null
+      return
     }
 
-    try {
-      println("Downloading thumbnail file for video ${video.videoId}")
+    println("Downloading thumbnail file for video ${video.videoId}")
 
-      val connection = URL(video.thumbnailUrl).openConnection() as HttpURLConnection
+    val connection = URL(video.thumbnailUrl).openConnection() as HttpURLConnection
 
-      if (connection.responseCode == 200) {
-        thumbnailFile.writeBytes(connection.inputStream.readAllBytes())
-        return null
-      }
-
-      val errorResponse = connection.errorStream.readAllBytes()
-
-      if (connection.responseCode == 404 && connection.contentType.startsWith("image")) {
-        println("Thumbnail seems to be gone, downloading the provided placeholder")
-        thumbnailFile.writeBytes(errorResponse)
-        return null
-      }
-
-      return "URL ${video.thumbnailUrl} responded ${connection.responseCode}\n${errorResponse.decodeToString()}"
-    } catch (exception: Exception) {
-      return exception.stackTraceToString()
+    if (connection.responseCode == 200) {
+      thumbnailFile.writeBytes(connection.inputStream.readAllBytes())
+      return
     }
+
+    val errorResponse = connection.errorStream.readAllBytes()
+
+    if (connection.responseCode == 404 && connection.contentType.startsWith("image")) {
+      println("Thumbnail seems to be gone, downloading the provided placeholder")
+      thumbnailFile.writeBytes(errorResponse)
+      return
+    }
+
+    throw IllegalStateException("URL ${video.thumbnailUrl} responded ${connection.responseCode}\n${errorResponse.decodeToString()}")
   }
 
-  private fun downloadVideo(videoId: String, videoNumber: Int, videoCount: Int): String? {
+  private fun downloadVideo(videoId: String, videoNumber: Int, videoCount: Int) {
     if (File(videoOutputDir, "$videoId.$VIDEO_FORMAT").exists()) {
       println("Found existing combined audio/video file for video $videoId ($videoNumber/$videoCount)")
-      return null
+      return
     }
 
     val videoFile = File(videoOutputDir, "$DOWNLOAD_FILES_PREFIX$videoId.$VIDEO_FORMAT")
     val audioFile = File(videoOutputDir, "$DOWNLOAD_FILES_PREFIX$videoId.$AUDIO_FORMAT")
-    val videoInfoRequest = RequestVideoInfo(videoId)
-    val response: Response<VideoInfo> = youtubeDownloader.getVideoInfo(videoInfoRequest)
 
-    if (response.status() == ResponseStatus.error)
-      return response.error().stackTraceToString()
+    val (bestVideoFormat, bestAudioFormat) = FormatLocator.locateDownloadFormats(videoId, videoNumber, videoCount)
 
-    val video: VideoInfo = response.data()
-
-    val bestVideoFormat = video.videoFormats()
-      .filter { it.extension().value() == VIDEO_FORMAT }
-      .sortedWith(compareBy({ it.videoQuality().ordinal }, { it.fps() }))
-      .last()
-      ?: return "ERROR: Could not locate a $VIDEO_FORMAT-format for video $videoId ($videoNumber/$videoCount)"
-
-    val videoError = downloadFormat(videoFile, bestVideoFormat, videoNumber, videoCount)
-
-    if (videoError != null)
-      return videoError.stackTraceToString()
-
-    val bestAudioFormat = video.audioFormats()
-      .filter { it.extension().value() == AUDIO_FORMAT }
-      .maxByOrNull { it.audioQuality().ordinal }
-      ?: return "ERROR: Could not locate a $AUDIO_FORMAT-format for video $videoId ($videoNumber/$videoCount)"
-
-    val audioError = downloadFormat(audioFile, bestAudioFormat, videoNumber, videoCount)
-
-    if (audioError != null)
-      return audioError.stackTraceToString()
-
-    return combineVideoFiles(videoId, videoFile, audioFile)
-  }
-
-  private fun downloadFormat(
-    outputFile: File, format: Format, videoNumber: Int, videoCount: Int,
-    skipExistenceCheck: Boolean = false
-  ): Throwable? {
-    val fileName = outputFile.name
-
-    if (!skipExistenceCheck && outputFile.exists()) {
-      println("Skipping existing file $fileName ($videoNumber/$videoCount)")
-      return null
+    val progressHandler: (Double) -> Unit = {
+      println("Downloaded $it% of ${videoFile.name} ($videoNumber/$videoCount)")
     }
 
-    currentOutputFile = outputFile
+    currentOutputFile = videoFile
+    if (!FormatDownloader.downloadFormat(bestVideoFormat, videoFile, progressHandler))
+      println("Skipped existing file ${videoFile.name}")
 
-    val request = RequestVideoFileDownload(format)
-      .saveTo(videoOutputDir)
-      .overwriteIfExists(true)
-      .renameTo(outputFile.nameWithoutExtension)
-      .callback(object : YoutubeProgressCallback<File> {
-        override fun onDownloading(progress: Int) {
-          println("Downloaded $progress% of $fileName ($videoNumber/$videoCount)")
-        }
+    currentOutputFile = audioFile
+    if (!FormatDownloader.downloadFormat(bestAudioFormat, audioFile, progressHandler))
+      println("Skipped existing file ${videoFile.name}")
 
-        override fun onFinished(videoInfo: File) {
-          val qualityString = when(format) {
-            is VideoFormat -> "${format.videoQuality().name} ${format.fps()} fps"
-            is AudioFormat -> "${format.audioQuality().name} sampleRate ${format.audioSampleRate()}"
-            else -> "?"
-          }
-
-          println("Finished downloading $fileName (quality $qualityString)")
-          currentOutputFile = null
-        }
-
-        override fun onError(throwable: Throwable) {
-          outputFile.delete() // Maybe next time, right? ;)
-          throwable.printStackTrace()
-        }
-      })
-      .async()
-
-
-    val result = youtubeDownloader.downloadVideoFile(request)
-    result.data() // will block current thread
-
-    if (result.status() == ResponseStatus.error)
-      return result.error()
-
-    return null
+    currentOutputFile = null
+    combineVideoFiles(videoId, videoFile, audioFile)
   }
 
   private fun findUploadsPlaylistId(apiKey: String, handle: String): String {

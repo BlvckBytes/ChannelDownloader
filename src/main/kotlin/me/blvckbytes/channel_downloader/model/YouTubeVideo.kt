@@ -1,5 +1,6 @@
 package me.blvckbytes.channel_downloader.model
 
+import me.blvckbytes.channel_downloader.ExtensionUtil
 import me.blvckbytes.springhttptesting.validation.JsonObjectExtractor
 import org.json.JSONObject
 
