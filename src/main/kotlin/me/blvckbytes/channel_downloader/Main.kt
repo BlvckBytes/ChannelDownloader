@@ -54,6 +54,7 @@ class Main {
       downloader.download(
         accessConfigKey("updateJson").toBoolean(),
         accessConfigKey("downloadVideos").toBoolean(),
+        accessConfigKey("downloadIgnoreList").split(',').map(String::trim).toSet()
       )
     }
   }

@@ -13,3 +13,6 @@ updateJson=true
 
 # Whether to download missing videos and thumbnails
 downloadVideos=true
+
+# List of video-ids to ignore when downloading, comma-separated
+downloadIgnoreList=

@@ -16,7 +16,6 @@ import java.time.temporal.ChronoField
 import java.util.*
 
 // TODO: Timestamps should really be objects, not plain strings...
-// TODO: Video-id ignore list in config
 
 /**
   Requests are made as follows:
@@ -88,6 +87,7 @@ class ChannelDownloader(
   fun download(
     updateJson: Boolean,
     downloadVideos: Boolean,
+    downloadIgnoreList: Set<String>,
   ) {
     var videos = loadLocalVideos()
 
@@ -102,30 +102,46 @@ class ChannelDownloader(
     if (downloadVideos) {
       println("Downloading videos")
 
+      val existingVideoIds = mutableListOf<String>()
       val errorVideoIds = mutableMapOf<String, String>()
       val numberOfVideos = videos.size
 
       for ((videoIndex, video) in videos.withIndex()) {
+        val videoId = video.videoId
         val videoNumber = videoIndex + 1
 
         try {
-          downloadVideo(video.videoId, videoNumber, numberOfVideos)
-          downloadThumbnail(video, videoNumber, numberOfVideos)
+          if (File(videoOutputDir, "$videoId.$VIDEO_FORMAT").exists()) {
+            println("Found existing combined audio/video file for video $videoId ($videoNumber/$numberOfVideos)")
+            existingVideoIds.add(videoId)
+            downloadThumbnailIfAbsent(video, videoNumber, numberOfVideos)
+            continue
+          }
+
+          if (downloadIgnoreList.contains(videoId)) {
+            println("Skipping ignored video $videoId")
+            continue
+          }
+
+          downloadVideo(videoId, videoNumber, numberOfVideos)
+          downloadThumbnailIfAbsent(video, videoNumber, numberOfVideos)
         } catch (exception: Exception) {
-          errorVideoIds[video.videoId] = exception.stackTraceToString()
+          errorVideoIds[videoId] = exception.stackTraceToString()
           continue
         }
       }
 
-      if (errorVideoIds.isEmpty())
-        return
+      if (errorVideoIds.isNotEmpty()) {
+        println("The following downloads resulted in an error:")
 
-      println("The following downloads resulted in an error:")
-
-      errorVideoIds.forEach {
-        println("- ${it.key}:")
-        println(it.value)
+        errorVideoIds.forEach {
+          println("- ${it.key}:")
+          println(it.value)
+        }
       }
+
+      println("Existing videoIds:")
+      println(existingVideoIds.joinToString(separator = ","))
     }
   }
 
@@ -197,7 +213,7 @@ class ChannelDownloader(
     throw IllegalStateException(logBuilder.toString())
   }
 
-  private fun downloadThumbnail(video: YouTubeVideo, videoNumber: Int, videoCount: Int) {
+  private fun downloadThumbnailIfAbsent(video: YouTubeVideo, videoNumber: Int, videoCount: Int) {
     val fileExtension = video.thumbnailUrl.substring(video.thumbnailUrl.lastIndexOf('.'))
     val thumbnailFile = File(videoOutputDir, "${video.videoId}$fileExtension")
 
@@ -227,11 +243,6 @@ class ChannelDownloader(
   }
 
   private fun downloadVideo(videoId: String, videoNumber: Int, videoCount: Int) {
-    if (File(videoOutputDir, "$videoId.$VIDEO_FORMAT").exists()) {
-      println("Found existing combined audio/video file for video $videoId ($videoNumber/$videoCount)")
-      return
-    }
-
     val videoFile = File(videoOutputDir, "$DOWNLOAD_FILES_PREFIX$videoId.$VIDEO_FORMAT")
     val audioFile = File(videoOutputDir, "$DOWNLOAD_FILES_PREFIX$videoId.$AUDIO_FORMAT")
 
