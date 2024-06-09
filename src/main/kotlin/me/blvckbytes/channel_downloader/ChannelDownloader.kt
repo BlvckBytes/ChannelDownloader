@@ -11,11 +11,11 @@ import me.blvckbytes.springhttptesting.validation.JsonObjectExtractor
 import java.io.*
 import java.net.HttpURLConnection
 import java.net.URL
-import java.time.format.DateTimeFormatter
+import java.time.ZonedDateTime
 import java.time.temporal.ChronoField
 import java.util.*
 
-// TODO: Timestamps should really be objects, not plain strings...
+// TODO: Implement videos.json files merger
 
 /**
   Requests are made as follows:
@@ -64,6 +64,7 @@ class ChannelDownloader(
   private val gson = GsonBuilder()
     .setPrettyPrinting()
     .serializeNulls()
+    .registerTypeAdapter(ZonedDateTime::class.java, ZonedDateTimeAdapter)
     .create()
 
   private var currentOutputFile: File? = null
@@ -165,7 +166,7 @@ class ChannelDownloader(
     }
 
     println("Extended all video comments: $commentsExtensionResult")
-    return updatedVideos
+    return updatedVideos.sortedByDescending { it.publishedAt.getLong(ChronoField.INSTANT_SECONDS) }
   }
 
   private fun combineVideoFiles(videoId: String, videoFile: File, audioFile: File) {
@@ -296,10 +297,7 @@ class ChannelDownloader(
           videosFile.readText(Charsets.UTF_8),
           Array<YouTubeVideo>::class.java
         )
-          .map { Pair(it, DateTimeFormatter.ISO_DATE_TIME.parse(it.publishedAt)) }
-          .sortedByDescending { it.second.getLong(ChronoField.INSTANT_SECONDS) }
-          .map { it.first }
-          .toList()
+          .sortedByDescending { it.publishedAt.getLong(ChronoField.INSTANT_SECONDS) }
       )
     } catch (exception: Exception) {
       when (exception) {

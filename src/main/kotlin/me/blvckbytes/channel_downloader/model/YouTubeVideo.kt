@@ -3,11 +3,12 @@ package me.blvckbytes.channel_downloader.model
 import me.blvckbytes.channel_downloader.ExtensionUtil
 import me.blvckbytes.springhttptesting.validation.JsonObjectExtractor
 import org.json.JSONObject
+import java.time.ZonedDateTime
 
 data class YouTubeVideo (
   override val id: String,
   val videoId: String,
-  val publishedAt: String,
+  val publishedAt: ZonedDateTime,
   val title: String,
   val description: String,
   val thumbnailUrl: String,
@@ -18,7 +19,7 @@ data class YouTubeVideo (
       return YouTubeVideo(
         extractor.extractValue("id", String::class),
         extractor.extractValue("contentDetails.videoId", String::class),
-        extractor.extractValue("contentDetails.videoPublishedAt", String::class),
+        ZonedDateTime.parse(extractor.extractValue("contentDetails.videoPublishedAt", String::class)),
         extractor.extractValue("snippet.title", String::class),
         extractor.extractValue("snippet.description", String::class),
         decideThumbnailUrl(extractor),

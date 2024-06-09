@@ -3,14 +3,15 @@ package me.blvckbytes.channel_downloader.model
 import me.blvckbytes.springhttptesting.validation.JsonObjectExtractor
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.ZonedDateTime
 
 data class YouTubeCommentThread(
   override val id: String,
   override val videoId: String,
   override val text: String,
   override val likeCount: Int,
-  override val publishedAt: String,
-  override val updatedAt: String,
+  override val publishedAt: ZonedDateTime,
+  override val updatedAt: ZonedDateTime,
   override val authorDisplayName: String,
   override val authorChannelId: String,
   val replyCount: Int,
@@ -23,8 +24,8 @@ data class YouTubeCommentThread(
         extractor.extractValue("snippet.topLevelComment.snippet.videoId", String::class),
         extractor.extractValue("snippet.topLevelComment.snippet.textOriginal", String::class),
         extractor.extractValue("snippet.topLevelComment.snippet.likeCount", Int::class),
-        extractor.extractValue("snippet.topLevelComment.snippet.publishedAt", String::class),
-        extractor.extractValue("snippet.topLevelComment.snippet.updatedAt", String::class),
+        ZonedDateTime.parse(extractor.extractValue("snippet.topLevelComment.snippet.publishedAt", String::class)),
+        ZonedDateTime.parse(extractor.extractValue("snippet.topLevelComment.snippet.updatedAt", String::class)),
         extractor.extractValue("snippet.topLevelComment.snippet.authorDisplayName", String::class),
         extractor.extractValue("snippet.topLevelComment.snippet.authorChannelId.value", String::class),
         extractor.extractValue("snippet.totalReplyCount", Int::class),

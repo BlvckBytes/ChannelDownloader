@@ -1,14 +1,15 @@
 package me.blvckbytes.channel_downloader.model
 
 import me.blvckbytes.springhttptesting.validation.JsonObjectExtractor
+import java.time.ZonedDateTime
 
 data class YouTubeCommentReply(
   override val id: String,
   override val videoId: String,
   override val text: String,
   override val likeCount: Int,
-  override val publishedAt: String,
-  override val updatedAt: String,
+  override val publishedAt: ZonedDateTime,
+  override val updatedAt: ZonedDateTime,
   override val authorDisplayName: String,
   override val authorChannelId: String,
 ) : YouTubeComment {
@@ -19,8 +20,8 @@ data class YouTubeCommentReply(
         videoId ?: extractor.extractValue("snippet.videoId", String::class),
         extractor.extractValue("snippet.textOriginal", String::class),
         extractor.extractValue("snippet.likeCount", Int::class),
-        extractor.extractValue("snippet.publishedAt", String::class),
-        extractor.extractValue("snippet.updatedAt", String::class),
+        ZonedDateTime.parse(extractor.extractValue("snippet.publishedAt", String::class)),
+        ZonedDateTime.parse(extractor.extractValue("snippet.updatedAt", String::class)),
         extractor.extractValue("snippet.authorDisplayName", String::class),
         extractor.extractValue("snippet.authorChannelId.value", String::class),
       )
