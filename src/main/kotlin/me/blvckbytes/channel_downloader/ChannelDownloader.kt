@@ -103,42 +103,22 @@ class ChannelDownloader(
     if (downloadVideos) {
       println("Downloading videos")
 
-      val existingVideoIds = mutableListOf<String>()
-      val errorVideoIds = mutableMapOf<String, String>()
-      val numberOfVideos = videos.size
-
-      for ((videoIndex, video) in videos.withIndex()) {
+      val existingVideoIds = forEachVideoWithErrorLogging(videos) loop@ { video, videoNumber, numberOfVideos ->
         val videoId = video.videoId
-        val videoNumber = videoIndex + 1
 
-        try {
-          if (File(videoOutputDir, "$videoId.$VIDEO_FORMAT").exists()) {
-            println("Found existing combined audio/video file for video $videoId ($videoNumber/$numberOfVideos)")
-            existingVideoIds.add(videoId)
-            downloadThumbnailIfAbsent(video, videoNumber, numberOfVideos)
-            continue
-          }
-
-          if (downloadIgnoreList.contains(videoId)) {
-            println("Skipping ignored video $videoId")
-            continue
-          }
-
-          downloadVideo(videoId, videoNumber, numberOfVideos)
+        if (File(videoOutputDir, "$videoId.$VIDEO_FORMAT").exists()) {
+          println("Found existing combined audio/video file for video $videoId ($videoNumber/$numberOfVideos)")
           downloadThumbnailIfAbsent(video, videoNumber, numberOfVideos)
-        } catch (exception: Exception) {
-          errorVideoIds[videoId] = exception.stackTraceToString()
-          continue
+          return@loop
         }
-      }
 
-      if (errorVideoIds.isNotEmpty()) {
-        println("The following downloads resulted in an error:")
-
-        errorVideoIds.forEach {
-          println("- ${it.key}:")
-          println(it.value)
+        if (downloadIgnoreList.contains(videoId)) {
+          println("Skipping ignored video $videoId")
+          return@loop
         }
+
+        downloadVideo(videoId, videoNumber, numberOfVideos)
+        downloadThumbnailIfAbsent(video, videoNumber, numberOfVideos)
       }
 
       println("Existing videoIds:")
@@ -309,14 +289,14 @@ class ChannelDownloader(
 
   private fun updateComments(
     apiKey: String,
-    videos: Iterable<YouTubeVideo>,
+    videos: Collection<YouTubeVideo>,
     progressCallback: (video: YouTubeVideo, elementNumber: Int, extensionResult: ExtensionUtil.ExtensionResult) -> Unit
   ): Pair<ExtensionUtil.ExtensionResult, List<YouTubeVideo>> {
     val totalExtensionResult = ExtensionUtil.ExtensionResult()
     val result = buildList {
       var elementNumber = 0
 
-      for (video in videos) {
+      forEachVideoWithErrorLogging(videos) { video, _, _ ->
         val (extensionResult, extendedVideo) = video.copyWithExtendedComments(fetchComments(apiKey, video))
         totalExtensionResult.extendBy(extensionResult)
         add(extendedVideo)
@@ -404,6 +384,38 @@ class ChannelDownloader(
       { println("There are $it videos in total") },
       { println("Fetched $it videos") }
     )
+  }
+
+  private inline fun forEachVideoWithErrorLogging(
+    videos: Collection<YouTubeVideo>,
+    loopCallback: (video: YouTubeVideo, videoNumber: Int, numberOfVideos: Int) -> Unit,
+  ): Set<String> {
+    val existingVideoIds = mutableSetOf<String>()
+    val errorVideoIds = mutableMapOf<String, String>()
+    val numberOfVideos = videos.size
+
+    for ((videoIndex, video) in videos.withIndex()) {
+      val videoId = video.videoId
+
+      try {
+        existingVideoIds.add(videoId)
+        loopCallback(video, videoIndex + 1, numberOfVideos)
+      } catch (exception: Exception) {
+        errorVideoIds[videoId] = exception.stackTraceToString()
+        continue
+      }
+    }
+
+    if (errorVideoIds.isNotEmpty()) {
+      println("The following videos resulted in an error:")
+
+      errorVideoIds.forEach {
+        println("- ${it.key}:")
+        println(it.value)
+      }
+    }
+
+    return existingVideoIds
   }
 
   private inline fun <T> collectPaginationItems(
