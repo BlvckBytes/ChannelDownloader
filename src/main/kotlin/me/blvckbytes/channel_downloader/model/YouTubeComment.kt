@@ -11,4 +11,5 @@ interface YouTubeComment : Identifiable {
   val updatedAt: ZonedDateTime
   val authorDisplayName: String
   val authorChannelId: String
+  val edits: Array<YouTubeCommentEdit>?
 }

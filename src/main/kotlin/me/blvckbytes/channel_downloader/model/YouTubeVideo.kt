@@ -49,21 +49,49 @@ data class YouTubeVideo (
 
   fun copyWithExtendedComments(commentList: List<YouTubeCommentThread>): Pair<ExtensionUtil.ExtensionResult, YouTubeVideo> {
     val totalExtensionResult: ExtensionUtil.ExtensionResult = ExtensionUtil.ExtensionResult()
+    var addedEditAnywhere = false
 
     val (threadExtensionResult, totalComments) = ExtensionUtil.extend(comments.iterator(), commentList.iterator(), { localThread, remoteThread ->
-      val (replyExtensionResult, totalReplies) = ExtensionUtil.extend(localThread.replies.iterator(), remoteThread.replies.iterator())
+      var resultThread = localThread
+
+      if (
+        resultThread.text != remoteThread.text &&
+        (resultThread.edits?.lastOrNull()?.text != remoteThread.text)
+      ) {
+        resultThread = resultThread.copyWithAdditionalEdit(YouTubeCommentEdit(remoteThread.text, remoteThread.updatedAt))
+        addedEditAnywhere = true
+      }
+
+      var addedEditToAReply = false
+
+      val (replyExtensionResult, totalReplies) = ExtensionUtil.extend(resultThread.replies.iterator(), remoteThread.replies.iterator(), { localReply, remoteReply ->
+        var resultReply = localReply
+
+        if (
+          resultReply.text != remoteReply.text &&
+          (resultReply.edits?.lastOrNull()?.text != remoteReply.text)
+        ) {
+          resultReply = resultReply.copyWithAdditionalEdit(YouTubeCommentEdit(remoteReply.text, remoteReply.updatedAt))
+          addedEditToAReply = true
+        }
+
+        resultReply
+      })
+
+      if (addedEditToAReply)
+        addedEditAnywhere = true
 
       totalExtensionResult.extendBy(replyExtensionResult)
 
-      if (replyExtensionResult.countMissingLocally > 0)
-        localThread.copyWithReplyList(totalReplies.toTypedArray())
-      else
-        localThread
+      if (addedEditToAReply || replyExtensionResult.countMissingLocally > 0)
+        resultThread = resultThread.copyWithReplyList(totalReplies.toTypedArray())
+
+      resultThread
     })
 
     totalExtensionResult.extendBy(threadExtensionResult)
 
-    if (totalExtensionResult.countMissingLocally == 0)
+    if (!addedEditAnywhere && totalExtensionResult.countMissingLocally == 0)
       return Pair(totalExtensionResult, this)
 
     return Pair(totalExtensionResult, YouTubeVideo(id, videoId, publishedAt, title, description, thumbnailUrl, totalComments.toTypedArray()))

@@ -14,6 +14,7 @@ data class YouTubeCommentThread(
   override val updatedAt: ZonedDateTime,
   override val authorDisplayName: String,
   override val authorChannelId: String,
+  override val edits: Array<YouTubeCommentEdit>?,
   val replyCount: Int,
   val replies: Array<YouTubeCommentReply>,
 ) : YouTubeComment {
@@ -28,6 +29,7 @@ data class YouTubeCommentThread(
         ZonedDateTime.parse(extractor.extractValue("snippet.topLevelComment.snippet.updatedAt", String::class)),
         extractor.extractValue("snippet.topLevelComment.snippet.authorDisplayName", String::class),
         extractor.extractValue("snippet.topLevelComment.snippet.authorChannelId.value", String::class),
+        arrayOf(),
         extractor.extractValue("snippet.totalReplyCount", Int::class),
         buildList {
           for (comment in extractor.extractValueIfExists("replies.comments", JSONArray::class) ?: return@buildList)
@@ -37,10 +39,17 @@ data class YouTubeCommentThread(
     }
   }
 
+  fun copyWithAdditionalEdit(edit: YouTubeCommentEdit): YouTubeCommentThread {
+    return YouTubeCommentThread(
+      id, videoId, text, likeCount, publishedAt, updatedAt,
+      authorDisplayName, authorChannelId, if (edits != null) edits + edit else arrayOf(edit), replyCount, replies
+    )
+  }
+
   fun copyWithReplyList(replyList: Array<YouTubeCommentReply>): YouTubeCommentThread {
     return YouTubeCommentThread(
       id, videoId, text, likeCount, publishedAt, updatedAt,
-      authorDisplayName, authorChannelId, replyCount, replyList
+      authorDisplayName, authorChannelId, edits, replyCount, replyList
     )
   }
 

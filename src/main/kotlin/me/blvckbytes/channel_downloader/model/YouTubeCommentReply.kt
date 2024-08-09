@@ -12,6 +12,7 @@ data class YouTubeCommentReply(
   override val updatedAt: ZonedDateTime,
   override val authorDisplayName: String,
   override val authorChannelId: String,
+  override val edits: Array<YouTubeCommentEdit>?,
 ) : YouTubeComment {
   companion object {
     fun extractComment(extractor: JsonObjectExtractor, videoId: String? = null): YouTubeCommentReply {
@@ -24,8 +25,16 @@ data class YouTubeCommentReply(
         ZonedDateTime.parse(extractor.extractValue("snippet.updatedAt", String::class)),
         extractor.extractValue("snippet.authorDisplayName", String::class),
         extractor.extractValue("snippet.authorChannelId.value", String::class),
+        arrayOf(),
       )
     }
+  }
+
+  fun copyWithAdditionalEdit(edit: YouTubeCommentEdit): YouTubeCommentReply {
+    return YouTubeCommentReply(
+      id, videoId, text, likeCount, publishedAt, updatedAt,
+      authorDisplayName, authorChannelId, if (edits != null) edits + edit else arrayOf(edit)
+    )
   }
 
   override fun equals(other: Any?): Boolean {
